@@ -1,0 +1,396 @@
+---
+title: "Do FIFA games accurately measure players' performances?"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning = FALSE,
+                      error = TRUE, fig.height = 4)
+
+library(tidyverse)
+library(broman)
+library(patchwork)
+source("../scripts/viridis-1.R")
+source("../scripts/ggprob.R")
+```
+
+```{r include = FALSE}
+
+#cleaning data for analysis
+
+
+fifa_23 = read_csv("fifa-23-players.csv")
+fifa_21 = read_csv("fifa-21-players.csv")
+
+fifa_21_cleaned = fifa_21 %>% 
+  select(Name, Nationality, Position, Age, Overall, Potential, Height, Weight, Value, Wage) %>% 
+  rename(position_21 = Position, age_21 = Age, overall_21 = Overall, potential_21 = Potential, height_21 = Height, weight_21 = Weight, value_21 = Value, wage_21 = Wage)
+
+fifa_23_cleaned = fifa_23 %>% 
+  select(Name, Nationality, Position, Age, Overall, Potential, Height, Weight, Value, Wage) %>% 
+  rename(position_23 = Position, age_23 = Age, overall_23 = Overall, potential_23 = Potential, height_23 = Height, weight_23 = Weight, value_23 = Value, wage_23 = Wage) 
+
+cleaned_data = fifa_21_cleaned %>% 
+  full_join(fifa_23_cleaned, by = c("Name" = "Name")) 
+
+cleaned_data = cleaned_data[!duplicated(cleaned_data$Name), ] %>% 
+  select(-Nationality.y) %>% 
+  rename(Nationality = Nationality.x) %>% 
+  drop_na()
+
+cleaned_data$wage_21 = gsub("\\€", "", cleaned_data$wage_21)
+cleaned_data$wage_21 =as.numeric(sub("K", "e3", cleaned_data$wage_21, fixed = TRUE))
+
+cleaned_data$wage_23 = gsub("\\€", "", cleaned_data$wage_23)
+cleaned_data$wage_23 =as.numeric(sub("K", "e3", cleaned_data$wage_23, fixed = TRUE))
+
+cleaned_data$value_21 = gsub("\\€", "", cleaned_data$value_21)
+cleaned_data$value_21 = as.numeric(sub("M", "e5", cleaned_data$value_21, fixed = TRUE))
+
+cleaned_data$value_23 = gsub("\\€", "", cleaned_data$value_23)
+cleaned_data$value_23 = as.numeric(sub("M", "e5", cleaned_data$value_23, fixed = TRUE))
+
+cleaned_data$height_23 =as.numeric(sub("cm", "", cleaned_data$height_23, fixed = TRUE))
+```
+
+### Introduction
+
+The FIFA World Cup has been underway for a few weeks now, and as fans of the sport, we knew we wanted this to be the target of our research. When looking for data pertaining to the world of football, we found a few datasets that were from the FIFA games readily available. Having played the game before, we knew our way around the various metrics assigned to players and their meanings, so we had a good understanding of our data from the outset.
+
+We were particularly interested in how games analyze players' stats and if they accurately reflect the potentials and "overalls" of players in real life. Our group decided to explore data about the ages of different players and their related potential to grow in the coming years based on the popular EA Sports video game series named 'FIFA'.
+
+In this project, we plan to answer three questions:
+
+* Does the potential expressed in FIFA games’ career modes accurately reflect a player’s growth in real life?
+* Does the height of a player correlate to a better performace on-field (and hence their OVR)?
+* After players turn 25, is their predicted growth in FIFA more accurate than those younger than that age?
+
+Our answer to these questions focuses on a few different parts and analyses. Firstly, we will check if the overall ratings of FIFA players in later games match the potential of those players in previous versions of the game to see how accurate FIFA is with its potential rating. We then find out the average age of players, and then create a linear model to see if there is a correlation between the height and OVR (overall) rating of a player. This can help people determine whether height has a feasible impact on game performance. We will also conduct a hypothesis test to see if the predicted growth of players above the age of 25 is more accurate than the predicted growth of players below this age.
+
+### Background
+
+> About the Raw Data
+
+Both our datasets were about FIFA stats  but from different years. The first data set called FIFA21_official_data.csv( renamed later for easy use)  was collected by a fan and was directly, or indirectly, collected from EA's Fifa game itself. It contains various stats of players including but not limited to their full name, their OVR, their potential, etc. The second data set called Fifa23_official_data.csv( renamed later for easy use)  was collected by a fan and was directly, or indirectly, collected from EA's Fifa game itself. It contained similar things to the first dataset but was for the year of 2023. By matching the name of players, we extract the player info that we need.
+
+> The 'cleaned' dataset we use:
+
+The data we are using is based on FIFA's stats about players in the 2021 and 2023 versions of the game. The data dives deeper into each player's information and stats such as their best positions, their value as a player, the wages that they get, statistics such as height, weight, etc. Position names might be hard to understand for the people who do not watch football. For example, CAM means center attacking midfielder, ST means striker, and CB means center back.The rest of the column names are pretty self-explanatory.
+
+> Data citation:
+
+B, Bryan. “FIFA21 Official Dataset.” Kaggle, 25 Oct. 2022, https://www.kaggle.com/datasets/bryanb/fifa-player-stats-database?select=FIFA21_official_data.csv. 
+
+B, Bryan. “FIFA23 Official Dataset.” Kaggle, 25 Oct. 2022, https://www.kaggle.com/datasets/bryanb/fifa-player-stats-database?select=FIFA23_official_data.csv. 
+
+> Our Focus for this Project
+
+OVR ratings (measured on a scale from 0-99) are a composite of various factors, including an internal assessment of each player's skill level in a certain area and their position and reputation inside the sport. To many people, this OVR rating is the simplest way to tell which of two players is better -- which speaks to the accuracy of the system as expressed inside the FIFA games. 
+
+Potential(measured on the same scale as OVR) is another rating created internally by EA that attempts to gauge a player's ability to grow in the coming seasons.
+
+We will be checking if the potential of players in previous versions of FIFA matches their OVR's in more recent versions to see how accurate EA Sports are in calculating the potential of a player. This OVR is usually calculated based on real life performances of the player, and therefore, for the purposes of this project, this OVR is an accurate representation of a players' real life performance in the past year. Therefore, this number, when compared with a previous potential, can tell us if FIFA accurately reflects the predicted growth of a player in real life.
+
+<font size = 5>
+**Analysis**
+</font>
+
+> Firstly, we want to understand our data better before we do any calculations. To do this, we've plotted a few distributions of players based on their nationalities, ages, overall ratings and potentials. This will better help us understand the distribution of players' overalls and potentials based on their age, which will help us answer our first question.
+
+```{r echo = FALSE}
+#nationality
+country = cleaned_data %>% 
+  group_by(Nationality) %>% 
+  summarise(Nationality = Nationality, count = n())
+
+country = country %>% 
+  arrange(desc(count)) %>% 
+  unique() %>% 
+  head(20)
+
+ggplot(country, aes(x = Nationality, y = count)) + 
+  geom_col(aes(fill = count)) + ggtitle("Distribution based on Nationality of Players (Top 20 Countries)") +
+  coord_flip()
+```
+
+From this graph, we can conclude that England has the most professional players recorded in the game by far, with over 600 players. Spain, Germany and France follow in suit with approximately ~380 players from each of these football giants.
+
+> We now check the distribution of ages to see how old most players are to get a better sense of the data which we will use later for our hypothesis test. 
+
+```{r echo = FALSE, out.width = "85%"}
+#age distribution
+
+g_age_21 = ggplot(data = cleaned_data, aes(x = age_21)) +
+  geom_histogram(aes(fill = ..count..), binwidth = 1, center = 0) + 
+  ggtitle("Distribution based on Age") + 
+  xlab("Player ages in 2021")
+
+g_age_23 = ggplot(data = cleaned_data, aes(age_23)) +
+  geom_histogram(aes(fill = ..count..), binwidth = 1, boundary = 0) + 
+  ggtitle("Distribution based on Age") +
+  xlab("Player ages in 2023")
+
+g_age_21 + g_age_23
+```
+
+We can conclude that in 2021, most players were aged between 19-25. The same can be seen for 2023, and the same bars seem to be offset by +2 which shows the data is accurate(some counts of bars are slightly more or less as some players might not have had their birthday yet when the game was released). We can also see that the data is skewed more towards older players (between 25-44).
+
+> We now check the distribution of overall ratings to help us better understand the data and see where the mean rating lies.
+
+```{r echo = FALSE, out.width = "85%"}
+#overall distribution
+
+g_overall_21= ggplot(data = cleaned_data, aes(overall_21)) + 
+  geom_histogram(aes(fill = ..count..), binwidth = 1, center = 0) + 
+  ggtitle("Distribution based on Overall Rating") +
+  xlab("Player overall ratings in 2021")
+
+g_overall_23= ggplot(data = cleaned_data, aes(overall_23)) +
+  geom_histogram(aes(fill = ..count..), binwidth = 1, center = 0) + 
+  ggtitle("Distribution based on Overall Rating") +
+  xlab("Player overall ratings in 2023")
+
+g_overall_21 + g_overall_23 + plot_layout(ncol = 1)
+```
+
+Here we see the distribution of players' ratings in 2021 and 2023. As we can see, the distribution stays mostly the same, which is quite accurate to real life scenarios where most professional players are average(between 70-78 OVR) and they lean off on either end of the spectrum. 
+
+> We now check the distribution of potential ratings to help us better understand the data and see where the mean potential lies.
+
+```{r echo = FALSE, out.width = "85%"}
+#potential distribution
+
+g_potential_21= ggplot(data = cleaned_data, aes(potential_21)) + 
+  geom_histogram(aes(fill = ..count..), binwidth = 1, center = 0) +
+  ggtitle("Distribution based on Potential Rating") +
+  xlab("Player Potential ratings in 2021")
+
+g_potential_23= ggplot(data = cleaned_data, aes(potential_23)) +
+  geom_histogram(aes(fill = ..count..), binwidth = 1, center = 0) + 
+  ggtitle("Distribution based on Potential Rating") +
+  xlab("Player Potential ratings in 2023")
+
+g_potential_21 + g_potential_23 + plot_layout(ncol = 1)
+```
+
+We can see that most player potentials are concentrated between 70-82,similarly to the OVR, and the data leans off from both sides almost like a bell curve.
+
+> Now that we've understood the data and the distributions, we want to see if FIFA's ratings and potential predictions are accurate to real-life data. 
+
+```{r echo = FALSE}
+#scatter potential vs rating
+
+basic_plot = ggplot(cleaned_data, aes(x = potential_21, y = overall_23)) + 
+  geom_point(alpha = 0.25,color="red") +
+  ggtitle("Overall Rating in Fifa 23 vs Potential in Fifa 21") +
+  xlab("Potential in Fifa 21") +
+  ylab("Overall in Fifa 23")
+
+basic_plot
+```
+
+```{r echo = FALSE}
+#bins for difference plot
+
+overall_predictions = cleaned_data %>% 
+  mutate(difference = overall_23 - potential_21, 
+         age_range = case_when(
+           age_21 >= 15 & age_21 <= 19 ~ "15-19",
+           age_21 >= 20 & age_21 <= 24 ~ "20-24",
+           age_21 >= 25 & age_21 <= 29 ~ "25-29",
+           age_21 >= 30 & age_21 <= 34 ~ "30-34",
+           age_21 >= 35 & age_21 <= 39 ~ "35-39",
+           age_21 >= 40 & age_21 <= 44 ~ "40-44"
+         )) %>% 
+  group_by(difference, age_range) %>% 
+  summarise(difference = difference, count = n(), age_range = age_range)
+```
+
+```{r echo = FALSE}
+#difference plot
+
+difference_plot = ggplot(overall_predictions, aes(x = difference)) +
+  geom_histogram(aes(fill = ..count..), binwidth = 1) +
+  facet_wrap(vars(age_range)) +
+  ggtitle("Deviations between overall in 2023 and potential in 2021") +
+  xlab("Deviation value")
+
+difference_plot
+```
+
+The first graph simply shows that there is a positive correlation between players' potentials in fifa 21 and their OVR in fifa 23. This is expected, and shows that our data is sound and rid of any glaring flaws.
+
+From the second graph above, we can see that players' whose ages were between 30-39 had the most accurate predictions with most of their data having deviated by a value of 0 (which means FIFA's potential prediction in 2021 mapped to their overall rating in 2023). We can also see that the younger age ranges of 15-19, 20-24 and even 25-29 had the most deviations between potentials and overalls. This makes sense, as players might not have developed to their potential yet (nearly impossible in just 2 years). There could be other factors to this too, which we discuss later.
+
+> We now run a linear regression model to check if height is a factor when it comes to overalls of players in FIFA and how it compares to real life. This attempts to answer the second question of our exploration.
+
+```{r echo=FALSE}
+new_data=cleaned_data
+new_data$overall_23=as.numeric(new_data$overall_23)
+height_23=new_data$height_23
+overall_23=new_data$overall_23
+#arrange in order
+new_data = head(arrange(new_data), n=100)
+data_new <- new_data                             
+data_new[is.na(data_new) | data_new == "Inf"] <- NA 
+x = list(title = "Overall")
+y= list(title = "Height (cm)")
+fit = lm(height_23 ~ overall_23, data_new)
+
+```
+
+```{r echo=FALSE}
+cleaned_data %>% 
+  ggplot( aes(x=height_23, y=overall_23) ) +
+  geom_point(alpha=0.2, color='blue') +
+  geom_smooth(method='lm', color='red', linetype='solid', se=FALSE) +
+  ggtitle("Overall vs Height") +
+  xlab("Height in Fifa 23") +
+  ylab("Overall in Fifa 23")
+```
+
+As evident from the graph (and intrinsically the linear model's coefficients), a linear model expressing a correlation between height and OVR for a player is not very effective. A cursory glance at the model's r squared value will also tell the same story --
+
+```{r echo = FALSE}
+cor(x=height_23, y=overall_23) ^ 2
+```
+
+This is the result we expected based on our observations as football fans. For instance, L.Messi and C.Ronaldo are 5'7 and 6'2 respectively but are still (arguably) the greatest of all time.
+
+> We now attempt to answer our third question by conducting a hypothesis test.
+
+```{r echo=FALSE}
+hypothesis_test_data = cleaned_data %>%
+  select(age_21, potential_21, overall_23) %>%
+  mutate(diff = overall_23 - potential_21)
+
+age_24_and_below = hypothesis_test_data %>%
+  filter(age_21 <= 24)
+
+age_25_and_above = hypothesis_test_data %>%
+  filter(age_21 > 24)
+
+age_25_above_mean = age_25_and_above %>%
+  summarize(mean = mean(diff)) %>%
+  pull(mean)
+
+sd_25_above = age_25_and_above %>%
+  summarize(sd = sd(diff)) %>%
+  pull(sd)
+
+var_25_above = sd_25_above^2
+
+count_25_above = age_25_and_above %>%
+  summarize(count = n())%>%
+  pull(count)
+
+age_24_below_mean = age_24_and_below %>%
+  summarize(mean = mean(diff)) %>%
+  pull(mean)
+
+sd_24_below = age_24_and_below %>%
+  summarize(sd = sd(diff)) %>%
+  pull(sd)
+
+var_24_below = sd_24_below^2
+
+count_24_below = age_24_and_below %>%
+  summarize(count = n())%>%
+  pull(count)
+
+```
+
+- The population is all possible differences in overalls and potentials of players in or not in the FIFA Database.
+- The sample is the 5127 players' data we have
+- Let $\Delta$ be the mean predicted growth, OVR in Fifa 23 - Potential in Fifa 21, in the population.
+- We have data pairs $(x_i, y_i)$ for $i = 1,\ldots,5127$.
+- Model the differences, $d_i = x_i - y_i$.
+
+$$
+D_i \sim F(\Delta, \sigma), \quad \text{for $i = 1, \ldots, n$}
+$$
+
+- $F$ is a generic distribution for the population of differences
+- $\Delta$ is the mean of this distribution
+- $\sigma$ is the standard deviation
+- The sample mean is d¯
+- The sample size is n
+- The sample standard deviation is s
+
+### Hypothesis Test
+
+- Hypotheses
+
+$H_0: \Delta = 0$    
+$H_a: \Delta \neq 0$
+
+- Test Statistic
+
+$$
+T = \frac{ \bar{d} - 0 }{s/\sqrt{n}}
+$$
+
+```{r echo=FALSE}
+sample_difference = age_25_above_mean - age_24_below_mean
+test_denominator = sqrt((var_25_above / count_25_above) + (var_24_below / count_24_below))
+test_stat = (sample_difference - 0)/test_denominator
+```
+
+```{r include=FALSE}
+diffs_25_above = age_25_and_above$diff
+diffs_24_below = age_24_and_below$diff
+
+t.test(diffs_25_above, diffs_24_below)
+```
+
+- Using the t.test method and the test statistic(T) formula, sampling distribution is approximately 44.56 with 5047.5 degrees of freedom.
+
+```{r echo=FALSE}
+pvalue = 2*pt(-abs(test_stat),5047.5)
+```
+- The calculated pvalue using the formula is 2.2e-16.
+
+Since the p-value is 2.2e-16, we can reject the null hypothesis that the difference between the mean predicted growth for age group 25 and above vs age group 24 and below is 0. There is enough evidence to suggest that this difference is actually not 0.
+
+
+We can also visualise our results in a graph to try to validate our hypothesis test.
+
+```{r echo=FALSE}
+mean_age_21=as.integer(mean(cleaned_data$age_21))
+players_under_mean=cleaned_data %>% 
+  filter(age_21<mean_age_21)
+players_above_mean=cleaned_data %>% 
+  filter(age_21>=mean_age_21)
+```
+```{r echo=FALSE}
+mean_age_21=as.integer(mean(cleaned_data$age_21))
+players_under_mean=cleaned_data %>% 
+  filter(age_21<mean_age_21)
+players_above_mean=cleaned_data %>% 
+  filter(age_21>=mean_age_21)
+```
+
+```{r echo=FALSE}
+cleaned_data %>% 
+  mutate(diffs = overall_23 - potential_21) %>% 
+  ggplot( aes(x = age_21, y = diffs) ) +
+  geom_point(alpha=0.2) +
+  geom_smooth(se=FALSE) +
+  geom_vline(xintercept=mean_age_21, color='red', linetype='dashed') +
+  ggtitle("Deviations vs Age in 2021") +
+  ylab("Deviation") +
+  xlab("Age in FIFA 2021")
+```
+
+This graph shows that the predicted growth in players below 24(our age cutoff) has a positive slope but after a certain point it stagnates at a value between -1 to -2. This validates our hypothesis test, as we can see that the average predicted growth for players under the age of 24 could be at any point between -15 to -5 based on the density of the points but the average for players above that age certainly lies between -3 to -1 (i.e, there is a huge difference in the variation, the standard deviation, and therefore the means).
+
+
+### Discussion Section
+
+> Firstly, before discussing our analysis, we must discuss the assumptions we made about our data. We are assuming that fifa is making accurate judgements based on real life performances to calculate players' overalls, potentials, etc. We are also assuming that the data collected by the fan through the game is accurate, and doesn't have any errors.
+
+> Based on our analysis, we can understand a few things about our data and about professional players in general. We can see that regardless of age, there is generally a positive correlation between players' overalls and potentials. However, we can also see that sometimes players don't match up to their potentials, which is a standard accross all sports. This could be due to multiple reasons, including distractions, 'overhyped' potentials, or simply not being able to keep up with the pressure. We can also see that generally, players that are older have overalls that are much more accurate to their potentials than their younger counterparts.Furthermore, through linear regression we can prove that height does not have an effect on a players' overall rating, and that regardless of your height, you can make it to the very top.
+
+> There are a couple of shortcomings of our project and our analysis. Our analysis only assesses accuracy over a two year period. This can be inaccurate for younger players, which can be seen from our graphs and anlyses. Another shortcoming is that there are different 'peak' ages for different positions, which could also change our analysis.
+
+> We could also expand our exploration by assessing accuracy over a 8 year period, by using stats from Fifa 14. This would provide a way better representation of the question we are trying to answer. Furthermore, we could try to answer questions like how much does a players' overall affect their value or their wage? Are there different underlying statistics for different positions that determine a player's overall? If so, which ones? These are just some questions that could be answered using our data and could be helpful for future renditions of the popular video game franchise.
